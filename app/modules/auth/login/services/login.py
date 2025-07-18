@@ -3,50 +3,50 @@ This module contains the business logic for user authentication and login operat
 It handles password verification, JWT token generation, login attempt validation,
 and security features like rate limiting and account lockout.
 
-Module: app.modules.login.services.login
 Dependencies: SQLAlchemy, passlib, python-jose
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
+from ..schemas.login import LoginResponse, UserInfo
 from passlib.context import CryptContext
-from jose import JWTError, jwt
+from jose import jwt
 
-from ..models.login import User
+from ...user.models.user import User
 from ....core.config import settings
+from ....core.security import create_access_token, create_refresh_token, verify_password
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class LoginService:
-    """
-    Business logic for user authentication and login operations.
-    Handles password verification, token generation, and login logging.
-    """
+    """Service class for login operations."""
 
     def __init__(self, db: Session):
         self.db = db
 
-    def authenticate_user(self, username: str, password: str) -> Optional[User]:
+    def authenticate_user(self, username: str, password: str):
         """
-        Authenticate user credentials against database.
+        Authenticate user with username/email and password.
+
+        Args:
+            username: Username or email
+            password: Plain text password
+
+        Returns:
+            User object if authentication successful, None otherwise
         """
+        # find user by username or email
         user = (
             self.db.query(User)
             .filter((User.username == username) | (User.email == username))
             .first()
         )
 
-        if not user or not user.is_active:
+        if not user or not verify_password(password, user.hashed_password):
             return None
-
-        if not self.verify_password(password, user.hashed_password):
-            return None
-
-        user.last_login = datetime.now(timezone.utc)
-        self.db.commit()
 
         return user
 
@@ -56,7 +56,9 @@ class LoginService:
         """
         return pwd_context.verify(plain_password, hashed_password)
 
-    def create_access_token(self, user: User, expires_delta: Optional[timedelta] = None) -> str:
+    def create_access_token(
+        self, user: User, expires_delta: Optional[timedelta] = None
+    ) -> str:
         """
         Create JWT access token for authenticated user.
         """
@@ -74,9 +76,7 @@ class LoginService:
         token_data["exp"] = expire
 
         encoded_jwt = jwt.encode(
-            token_data,
-            settings.SECRET_KEY,
-            algorithm=settings.ALGORITHM
+            token_data, settings.SECRET_KEY, algorithm=settings.ALGORITHM
         )
         return encoded_jwt
 
@@ -114,56 +114,49 @@ class LoginService:
         user.last_failed_login = None
         self.db.commit()
 
-    def get_user_info(self, user: User) -> Dict[str, Any]:
+    def get_user_info(self, user) -> UserInfo:
         """
-        Get user information for login response.
-        """
-        return {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "full_name": user.full_name,
-            "is_active": user.is_active,
-            "created_at": user.created_at,
-            "last_login": user.last_login
-        }
+        Get user information for response.
 
-    def create_refresh_token(self, user: User) -> str:
-        """
-        Create refresh token for token renewal.
-        """
-        token_data = {
-            "sub": str(user.id),
-            "type": "refresh",
-            "exp": datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-            "iat": datetime.now(timezone.utc)
-        }
+        Args:
+            user: User object
 
-        return jwt.encode(
-            token_data,
-            settings.SECRET_KEY,
-            algorithm=settings.ALGORITHM
+        Returns:
+            UserInfo schema
+        """
+        return UserInfo(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            full_name=user.full_name,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            last_login=user.last_login,
         )
 
-    def verify_refresh_token(self, refresh_token: str) -> Optional[User]:
+    def create_login_response(self, user) -> LoginResponse:
         """
-        Verify refresh token and return user.
+        Create complete login response with tokens and user info.
+
+        Args:
+            user: User object
+
+        Returns:
+            LoginResponse with tokens and user info
         """
-        try:
-            payload = jwt.decode(
-                refresh_token,
-                settings.SECRET_KEY,
-                algorithms=[settings.ALGORITHM]
-            )
+        # Generate JWT tokens
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, expires_delta=access_token_expires
+        )
+        refresh_token = create_refresh_token(data={"sub": user.username})
 
-            user_id = payload.get("sub")
-            token_type = payload.get("type")
+        user_info = self.get_user_info(user)
 
-            if user_id is None or token_type != "refresh":
-                return None
-
-            user = self.db.query(User).filter(User.id == int(user_id)).first()
-            return user if user and user.is_active else None
-
-        except JWTError:
-            return None
+        return LoginResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user=user_info,
+        )
