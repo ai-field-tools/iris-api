@@ -18,8 +18,7 @@ from app.modules.database.database import get_db
 from ....core.config import settings
 from ....core.security import get_current_user
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
-
+router = APIRouter()
 
 @router.post("/login", response_model=LoginResponse)
 async def login(
