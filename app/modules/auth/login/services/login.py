@@ -153,6 +153,7 @@ class LoginService:
 
         user_info = self.get_user_info(user)
 
+
         return LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
