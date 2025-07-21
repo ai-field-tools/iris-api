@@ -10,7 +10,7 @@ Dependencies: FastAPI, SQLAlchemy, JWT tokens
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from app.modules.database.database import get_db
+from app.modules.database.base import get_db
 from ....core.security import get_current_user
 from ..services.logout import LogoutService
 from app.modules.auth.user.models.user import User
