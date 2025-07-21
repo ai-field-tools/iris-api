@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from ..services.login import LoginService
 from ..schemas.login import LoginRequest,LoginResponse
-from app.modules.database.database import get_db
+from app.modules.database.base import get_db
 from ....core.config import settings
 from ....core.security import get_current_user
 
